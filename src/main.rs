@@ -1,9 +1,19 @@
 extern crate sdl2;
 
+// Import Game struct from game.rs
+mod game;
+
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
+use sdl2::render::Canvas;
 use std::time::Duration;
+
+fn render(canvas: &mut Canvas<sdl2::video::Window>, color: Color) {
+    canvas.set_draw_color(color);
+    canvas.clear();
+    canvas.present();
+}
 
 pub fn main() -> Result<(), String> {
     let sdl_context = sdl2::init()?;
@@ -22,8 +32,16 @@ pub fn main() -> Result<(), String> {
     canvas.present();
 
     let mut event_pump = sdl_context.event_pump()?;
+    
+    // Create a new Game instance
+    let mut game = game::Game::new();
+    // Initialize the game
+    game.start();
 
     'running: loop {
+        // Update the game
+        game.update();
+        
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. }
@@ -34,10 +52,10 @@ pub fn main() -> Result<(), String> {
                 _ => {}
             }
         }
-
-        canvas.clear();
-        canvas.present();
-        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 30));
+        // Render the game
+        render(&mut canvas, Color::RGB(230, 230, 230));
+        // Time management!
+        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
     }
 
     Ok(())
