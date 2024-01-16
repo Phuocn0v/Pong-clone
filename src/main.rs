@@ -3,118 +3,49 @@ extern crate sdl2;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
-use sdl2::render::{Texture, WindowCanvas};
 use std::time::Duration;
-// "self" imports the "image" module itself as well as everything else we listed
-use sdl2::image::{self, InitFlag, LoadTexture};
-use sdl2::rect::{Point, Rect};
 
-const PLAYER_MOVEMENT_SPEED: i32 = 5;
+mod game_state;
+use game_state::{GameContext, GameState, PlayerDirection, Point};
+mod game_renderer;
+use game_renderer::Renderer;
+mod game_config;
+use game_config::{DOT_SIZE_IN_PXS, GRID_X_SIZE, GRID_Y_SIZE};
 
-#[derive(Debug)]
-enum Direction {
-    Up,
-    Down,
-    Left,
-    Right,
-}
-
-#[derive(Debug)]
-struct Player {
-    position: Point,
-    sprite: Rect,
-    speed: i32,
-    direction: Direction,
-    current_frame: i32,
-}
-
-fn updatePlayer(player: &mut Player) {
-    use self::Direction::*;
-    match player.direction {
-        Left => {
-            player.position = player.position.offset(-player.speed, 0);
-        },
-        Right => {
-            player.position = player.position.offset(player.speed, 0);
-        },
-        Up => {
-            player.position = player.position.offset(0, -player.speed);
-        },
-        Down => {
-            player.position = player.position.offset(0, player.speed);
-        },
+pub fn update(renderer: &mut Renderer, context: &mut GameContext) {
+    // Update game logic in here.
+    if (context.state == GameState::Playing) {
+        context.moving();
     }
-    
-    // Only continue to animate if the player is moving
-    if player.speed != 0 {
-        // Cheat: using the fact that all animations are 3 frames (NOT extensible)
-        player.current_frame = (player.current_frame + 1) % 3;
+    if (context.player_position[0].0 == context.food.0
+        && context.player_position[0].1 == context.food.1)
+    {
+        context.eat();
     }
-}
-
-fn direction_to_sprite_index(direction: &Direction) -> i32 {
-    use self::Direction::*;
-    match *direction {
-        Up => 3,
-        Down => 0,
-        Left => 1,
-        Right => 2,
-    }
-}
-
-fn render(
-    canvas: &mut WindowCanvas,
-    color: Color,
-    texture: &Texture,
-    player: &Player,
-) -> Result<(), String> {
-    let (width, height) = canvas.output_size()?;
-    
-    let (frame_width, frame_height) = player.sprite.size();
-    let current_frame = Rect::new(
-        player.sprite.x() + frame_width as i32,
-        player.sprite.y() + frame_height as i32 * direction_to_sprite_index(&player.direction),
-        frame_width,
-        frame_height,
-    );
-    
-    let screen_position = player.position + Point::new(width as i32 / 2, height as i32 / 2);
-    let screen_rect = Rect::from_center(screen_position, player.sprite.width(), player.sprite.height());
-
-    canvas.set_draw_color(color);
-    canvas.clear();
-    canvas.copy(texture, current_frame, screen_rect)?;
-    canvas.present();
-
-    Ok(())
+    renderer.draw(&context);
 }
 
 pub fn main() -> Result<(), String> {
-    let sdl_context = sdl2::init()?;
-    let video_subsystem = sdl_context.video()?;
-    let _image_context = sdl2::image::init(sdl2::image::InitFlag::PNG)?;
+    let sdl_context = sdl2::init().unwrap();
+    let video_subsystem = sdl_context.video().unwrap();
 
     let window = video_subsystem
-        .window("Pong clone", 800, 600)
+        .window(
+            "game window",
+            GRID_X_SIZE * DOT_SIZE_IN_PXS as u32,
+            GRID_Y_SIZE * DOT_SIZE_IN_PXS as u32,
+        )
         .position_centered()
         .opengl()
         .build()
-        .map_err(|e| e.to_string())?;
+        .unwrap();
 
-    let mut canvas = window.into_canvas().build().map_err(|e| e.to_string())?;
-    let texture_creator = canvas.texture_creator();
-    let texture = texture_creator.load_texture("assets/bardo.png")?;
+    let mut event_pump = sdl_context.event_pump().unwrap();
 
-    let mut event_pump = sdl_context.event_pump()?;
-
-    let mut player = Player {
-        position: Point::new(0, 0),
-        sprite: Rect::new(0, 0, 26, 36),
-        speed: 0,
-        direction: Direction::Right,
-        current_frame: 0,
-    };
-
+    // Game state and renderer
+    let mut game_context = GameContext::new();
+    let mut renderer = Renderer::new(window).unwrap();
+    let mut frame_counter = 0;
     'running: loop {
         for event in event_pump.poll_iter() {
             match event {
@@ -123,44 +54,50 @@ pub fn main() -> Result<(), String> {
                     keycode: Some(Keycode::Escape),
                     ..
                 } => break 'running,
-                
-                Event::KeyDown { keycode: Some(Keycode::Left), repeat: false, .. } => {
-                    player.speed = PLAYER_MOVEMENT_SPEED;
-                    player.direction = Direction::Left;
-                },
-                Event::KeyDown { keycode: Some(Keycode::Right), repeat: false, .. } => {
-                    player.speed = PLAYER_MOVEMENT_SPEED;
-                    player.direction = Direction::Right;
-                },
-                Event::KeyDown { keycode: Some(Keycode::Up), repeat: false, .. } => {
-                    player.speed = PLAYER_MOVEMENT_SPEED;
-                    player.direction = Direction::Up;
-                },
-                Event::KeyDown { keycode: Some(Keycode::Down), repeat: false, .. } => {
-                    player.speed = PLAYER_MOVEMENT_SPEED;
-                    player.direction = Direction::Down;
-                },
-                Event::KeyUp { keycode: Some(Keycode::Left), repeat: false, .. } |
-                Event::KeyUp { keycode: Some(Keycode::Right), repeat: false, .. } |
-                Event::KeyUp { keycode: Some(Keycode::Up), repeat: false, .. } |
-                Event::KeyUp { keycode: Some(Keycode::Down), repeat: false, .. } => {
-                    player.speed = 0;
-                },
+                Event::KeyDown {
+                    keycode: Some(Keycode::Up),
+                    ..
+                } => {
+                    game_context.player_direction = PlayerDirection::Up;
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Down),
+                    ..
+                } => {
+                    game_context.player_direction = PlayerDirection::Down;
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Left),
+                    ..
+                } => {
+                    game_context.player_direction = PlayerDirection::Left;
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Right),
+                    ..
+                } => {
+                    game_context.player_direction = PlayerDirection::Right;
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Space),
+                    ..
+                } => {
+                    game_context.state = match game_context.state {
+                        GameState::Paused => GameState::Playing,
+                        GameState::Playing => GameState::Paused,
+                    }
+                }
+
                 _ => {}
             }
         }
-        // Update the game
-        updatePlayer(&mut player);
-        // Render the game
-        render(
-            &mut canvas,
-            Color::RGB(230, 230, 230),
-            &texture,
-            &player
-        )?;
-        // Time management!
-        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
+        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 30));
+        // The rest of the game loop goes here...
+        frame_counter += 1;
+        if (frame_counter == 10) {
+            update(&mut renderer, &mut game_context);
+            frame_counter = 0;
+        }
     }
-
-    Ok(())
+    return Ok(());
 }
